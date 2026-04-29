@@ -14,7 +14,7 @@
   const FT_PER_M = 3.28084;
   const QUARTER_FT = (f) => 234 / f;
   const HF_F_MIN = 1.8;
-  const HF_F_MAX = 30;
+  const HF_F_MAX = 54;
 
   // Hall (1974) loading-coil formula, adapted for a quarter-wave vertical
   // over an assumed perfect ground plane (image theory: A_dipole/2 = H_vertical).
@@ -80,8 +80,10 @@
     return 0.5 * (lo + hi);
   }
 
-  // Solve for `target` ('H'|'B'|'L'|'f') given the other three values + wire diameter.
-  function solve(target, vals, D) {
+  // Solve for `target` ('H'|'B'|'L'|'f') given the other three values + wire
+  // diameter. When solving for f, an optional band restricts the search to that
+  // band's edges so the solution stays where the user expects.
+  function solve(target, vals, D, band) {
     if (target === "L") {
       return forwardL(vals.H, vals.B, vals.f, D);
     }
@@ -98,8 +100,8 @@
     }
     if (target === "f") {
       const fHiByGeom = 234 / vals.H - 1e-3; // need H < 234/f
-      const hi = Math.min(HF_F_MAX, fHiByGeom);
-      const lo = HF_F_MIN;
+      const lo = band ? band.lo : HF_F_MIN;
+      const hi = Math.min(band ? band.hi : HF_F_MAX, fHiByGeom);
       if (hi <= lo) return NaN;
       const g = (f) => forwardL(vals.H, vals.B, f, D) - vals.L;
       return bisect(g, lo, hi);
@@ -121,7 +123,25 @@
     { name: "15m", lo: 21.0, hi: 21.45 },
     { name: "12m", lo: 24.89, hi: 24.99 },
     { name: "10m", lo: 28.0, hi: 29.7 },
+    { name: "6m", lo: 50.0, hi: 54.0 },
   ];
+
+  // Per-band starting geometry. Roughly ~60% of free-space quarter-wave at the
+  // band midpoint with the coil at H/2. User overrides are remembered per-band
+  // so switching bands and back recovers what they had.
+  const BAND_DEFAULTS = {
+    "160m": { H: 30, B: 15 },
+    "80m": { H: 25, B: 12.5 },
+    "60m": { H: 20, B: 10 },
+    "40m": { H: 15, B: 7.5 },
+    "30m": { H: 10, B: 5 },
+    "20m": { H: 8, B: 4 },
+    "17m": { H: 6, B: 3 },
+    "15m": { H: 5, B: 2.5 },
+    "12m": { H: 4, B: 2 },
+    "10m": { H: 3.5, B: 1.75 },
+    "6m": { H: 2.5, B: 1.25 },
+  };
   const SWR_Z0 = 50;
   const SWR_THRESHOLD = 2.0;
 
@@ -302,7 +322,14 @@
   const $ = (sel) => document.querySelector(sel);
   const $$ = (sel) => document.querySelectorAll(sel);
 
-  const state = { units: "ft", target: "L", awg: 12, feedR: 36 };
+  const state = {
+    units: "ft",
+    target: "L",
+    awg: 12,
+    feedR: 36,
+    band: null, // set in applyDefaults
+    bandStore: {}, // bandName -> { H, B, L, f, target } in feet/µH/MHz
+  };
 
   const inputs = {
     H: $("#in-H"),
@@ -363,7 +390,7 @@
       }
     }
     if (isFinite(vals.f) && (vals.f < HF_F_MIN || vals.f > HF_F_MAX)) {
-      return { ok: false, msg: "Frequency outside HF range (1.8–30 MHz)." };
+      return { ok: false, msg: "Frequency outside supported range (1.8–54 MHz)." };
     }
     if (isFinite(vals.H) && isFinite(vals.B) && vals.B >= vals.H) {
       return { ok: false, msg: "Coil position B must be below the top of the antenna (B < H)." };
@@ -416,7 +443,7 @@
     const D = AWG[state.awg];
     let answer;
     try {
-      answer = solve(state.target, vals, D);
+      answer = solve(state.target, vals, D, state.band);
     } catch (e) {
       setError("Calculation produced a non-physical result; check inputs.");
       resultEl.textContent = "—";
@@ -465,12 +492,15 @@
       return;
     }
 
-    const band = findBand(v.f);
+    const band = state.band || findBand(v.f);
     const samples = sweep(v.H, v.B, v.L, D, R, band);
     const bw = bandwidthSWR2(samples);
 
     swrPlotEl.innerHTML = renderPlot(samples, v.f, band, bw);
-    swrBandEl.textContent = band.name + (band.custom ? " (no ham band match)" : "");
+    const fInBand = v.f >= band.lo && v.f <= band.hi;
+    swrBandEl.textContent =
+      band.name +
+      (band.custom ? " (no ham band match)" : fInBand ? "" : " (f outside band)");
     swrMinEl.textContent = isFinite(bw.minSWR)
       ? bw.minSWR.toFixed(2) + " @ " + bw.minF.toFixed(3) + " MHz"
       : "—";
@@ -483,6 +513,57 @@
     } else {
       swrBwEl.textContent = "SWR ≥ 2 across the band — adjust geometry or feedpoint R";
     }
+  }
+
+  // Capture the current parameter set in canonical units (feet, µH, MHz). NaNs
+  // for blank fields are preserved so we don't pretend a missing target was set.
+  function snapshotForBand() {
+    const v = readVals();
+    return { H: v.H, B: v.B, L: v.L, f: v.f, target: state.target };
+  }
+
+  function restoreFromSnapshot(snap) {
+    const factor = state.units === "m" ? 1 / FT_PER_M : 1;
+    inputs.H.value = isFinite(snap.H) ? (snap.H * factor).toFixed(2) : "";
+    inputs.B.value = isFinite(snap.B) ? (snap.B * factor).toFixed(2) : "";
+    inputs.L.value = isFinite(snap.L) ? snap.L.toFixed(2) : "";
+    inputs.f.value = isFinite(snap.f) ? snap.f.toFixed(3) : "";
+    if (snap.target) {
+      state.target = snap.target;
+      const r = document.querySelector(
+        "input[name=solveFor][value=" + snap.target + "]"
+      );
+      if (r) r.checked = true;
+    }
+  }
+
+  function highlightActiveBand() {
+    const name = state.band ? state.band.name : null;
+    document.querySelectorAll(".band-btn").forEach((b) => {
+      b.classList.toggle("active", b.dataset.band === name);
+    });
+  }
+
+  function selectBand(bandName) {
+    const newBand = HAM_BANDS.find((b) => b.name === bandName);
+    if (!newBand || newBand === state.band) return;
+    if (state.band) {
+      state.bandStore[state.band.name] = snapshotForBand();
+    }
+    state.band = newBand;
+    const stored = state.bandStore[bandName];
+    if (stored) {
+      restoreFromSnapshot(stored);
+    } else {
+      // Fresh band: midpoint frequency, geometry from the per-band table,
+      // solve for L so the user sees an immediate sanity-check answer.
+      const d = BAND_DEFAULTS[bandName] || { H: 25, B: 12.5 };
+      const fmid = 0.5 * (newBand.lo + newBand.hi);
+      restoreFromSnapshot({ H: d.H, B: d.B, L: NaN, f: fmid, target: "L" });
+    }
+    highlightActiveBand();
+    applyTargetStyling();
+    recalc();
   }
 
   function onUnitsToggle(newUnits) {
@@ -527,6 +608,9 @@
         updateSWR();
       });
     }
+    document.querySelectorAll(".band-btn").forEach((btn) => {
+      btn.addEventListener("click", () => selectBand(btn.dataset.band));
+    });
   }
 
   function applyDefaults() {
@@ -541,9 +625,12 @@
     state.target = "L";
     state.awg = 12;
     state.feedR = 36;
+    state.band = HAM_BANDS.find((b) => b.name === "80m");
+    state.bandStore = {};
     if (feedREl) feedREl.value = "36";
     unitSpans.H.textContent = "ft";
     unitSpans.B.textContent = "ft";
+    highlightActiveBand();
   }
 
   document.addEventListener("DOMContentLoaded", () => {
