@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Coil-Shortened Vertical Calculator</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="masthead">
+      <div class="title-block">
+        <h1>Coil-Shortened Vertical Calculator</h1>
+        <p class="subtitle">
+          Hall (1974) loading-coil formula &middot; HF, ground-plane vertical
+        </p>
+      </div>
+      <fieldset class="units-toggle" aria-label="Units for height and coil position">
+        <legend class="visually-hidden">Length units</legend>
+        <label>
+          <input type="radio" name="units" value="ft" checked />
+          <span>ft</span>
+        </label>
+        <label>
+          <input type="radio" name="units" value="m" />
+          <span>m</span>
+        </label>
+      </fieldset>
+    </header>
+
+    <main class="layout">
+      <section class="diagram">
+        <figure>
+          <img
+            src="coil-shortened-vertical_antenna.png"
+            alt="A coil-shortened vertical antenna with a loading coil partway up the radiator and a ground-radial system at the base."
+          />
+          <figcaption>
+            <strong>H</strong> — total antenna height &nbsp;·&nbsp;
+            <strong>B</strong> — base to coil center &nbsp;·&nbsp;
+            <strong>L</strong> — coil inductance &nbsp;·&nbsp;
+            <strong>f</strong> — operating frequency
+          </figcaption>
+        </figure>
+      </section>
+
+      <section class="panel">
+        <fieldset class="params">
+          <legend>Parameters</legend>
+
+          <div class="row" data-var="H">
+            <input type="radio" name="solveFor" id="solve-H" value="H" />
+            <label for="solve-H" class="radio-label" title="Solve for total height"></label>
+            <label for="in-H" class="field-label">Total height (H)</label>
+            <input type="number" id="in-H" step="any" inputmode="decimal" autocomplete="off" />
+            <span class="unit" id="unit-H">ft</span>
+          </div>
+
+          <div class="row" data-var="B">
+            <input type="radio" name="solveFor" id="solve-B" value="B" />
+            <label for="solve-B" class="radio-label" title="Solve for coil position"></label>
+            <label for="in-B" class="field-label">Coil position (B)</label>
+            <input type="number" id="in-B" step="any" inputmode="decimal" autocomplete="off" />
+            <span class="unit" id="unit-B">ft</span>
+          </div>
+
+          <div class="row" data-var="L">
+            <input type="radio" name="solveFor" id="solve-L" value="L" checked />
+            <label for="solve-L" class="radio-label" title="Solve for inductance"></label>
+            <label for="in-L" class="field-label">Inductance (L)</label>
+            <input type="number" id="in-L" step="any" inputmode="decimal" autocomplete="off" />
+            <span class="unit">µH</span>
+          </div>
+
+          <div class="row" data-var="f">
+            <input type="radio" name="solveFor" id="solve-f" value="f" />
+            <label for="solve-f" class="radio-label" title="Solve for frequency"></label>
+            <label for="in-f" class="field-label">Frequency (f)</label>
+            <input type="number" id="in-f" step="any" inputmode="decimal" autocomplete="off" />
+            <span class="unit">MHz</span>
+          </div>
+
+          <div class="row aux">
+            <span class="radio-label" aria-hidden="true"></span>
+            <label for="awg" class="field-label">Wire gauge</label>
+            <select id="awg">
+              <option value="10">AWG 10</option>
+              <option value="12" selected>AWG 12</option>
+              <option value="14">AWG 14</option>
+              <option value="16">AWG 16</option>
+              <option value="18">AWG 18</option>
+              <option value="20">AWG 20</option>
+            </select>
+            <span class="unit"></span>
+          </div>
+        </fieldset>
+
+        <div class="readout" aria-live="polite">
+          <span class="readout-label" id="result-label">Inductance</span>
+          <output id="result">—</output>
+          <span class="readout-unit" id="result-unit">µH</span>
+        </div>
+
+        <p id="error" role="alert"></p>
+
+        <p class="hint">
+          Pick which parameter to <em>solve&nbsp;for</em> with the radio button on its row.
+          The other three fields stay editable; the solved value updates as you type.
+        </p>
+      </section>
+    </main>
+
+    <section class="swr">
+      <div class="swr-head">
+        <h2>SWR &amp; Bandwidth</h2>
+        <div class="swr-controls">
+          <label for="in-R" class="field-label">Feedpoint R</label>
+          <input type="number" id="in-R" step="any" min="1" max="500" inputmode="decimal" autocomplete="off" />
+          <span class="unit">Ω</span>
+        </div>
+      </div>
+
+      <div class="swr-stats">
+        <div class="swr-stat">
+          <span class="readout-label">Band</span>
+          <span class="readout-value" id="swr-band">—</span>
+        </div>
+        <div class="swr-stat">
+          <span class="readout-label">Min SWR</span>
+          <span class="readout-value" id="swr-min">—</span>
+        </div>
+        <div class="swr-stat wide">
+          <span class="readout-label">Useable bandwidth (SWR &lt; 2)</span>
+          <span class="readout-value" id="swr-bw">—</span>
+        </div>
+      </div>
+
+      <div id="swr-plot" class="swr-plot-container" aria-live="polite"></div>
+
+      <p class="hint">
+        Estimated assuming a fixed feedpoint resistance — the reactance comes from the
+        Hall lumped model and is exact at <em>f₀</em>; the resistive part is a stand-in for
+        radiation resistance plus ground/coil losses, so treat the bandwidth number as an
+        order-of-magnitude guide rather than a measurement. Typical short-vertical
+        feedpoint R with a moderate radial field falls in the 25 – 50 Ω range.
+      </p>
+    </section>
+
+    <footer>
+      <p>
+        Formula: J. Hall, K6FXF — <em>QST</em>, September 1974.
+        Assumes a quarter-wave vertical over a perfect ground (image theory).
+        Wire diameter taken from the AWG dropdown (bare copper, in inches).
+      </p>
+    </footer>
+
+    <script src="app.js"></script>
+  </body>
+</html>
